@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /opt/equipment-rebuild
+[ "${EMS_ISOLATED_FIXTURE:-}" = YES ] || { echo 'Refusing without explicit isolated fixture confirmation' >&2; exit 1; }
+project=scope-race-20261105
+[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" ] || { echo 'Existing project containers; refusing' >&2; exit 1; }
+[ -f /tmp/scope-matrix-build/ruoyi-admin/target/ruoyi-admin.jar ] || { echo 'Missing separately built test JAR' >&2; exit 1; }
+if ss -ltn | awk '{print $4}' | grep -Eq ':(22090|23306)$'; then echo 'Test port already in use' >&2; exit 1; fi
+work=$(mktemp -d /tmp/equipment-create-e2e.XXXXXX)
+mkdir "$work/mysql" "$work/uploads" "$work/private"
+chmod 777 "$work/mysql" "$work/uploads" "$work/private"
+cat > "$work/isolate.yaml" <<YAML
+services:
+  mysql:
+    volumes:
+      - $work/mysql:/var/lib/mysql
+  backend:
+    volumes:
+      - /tmp/scope-matrix-build/ruoyi-admin/target/ruoyi-admin.jar:/app/app.jar:ro
+      - $work/uploads:/app/uploads
+      - $work/private:/app/private-uploads
+YAML
+cat > "$work/disabled.yaml" <<'YAML'
+services:
+  backend:
+    environment:
+      EQUIPMENT_DEPARTMENT_SCOPE_ENABLED: 'false'
+      EQUIPMENT_DEPARTMENT_SCOPE_EXPERIMENTAL: 'false'
+YAML
+base=(docker compose -p "$project" -f compose.scope-race.yaml -f "$work/isolate.yaml")
+cleanup() { local result=$?; trap - EXIT; "${base[@]}" down >/dev/null 2>&1 || { echo 'Temporary containers could not be removed' >&2; exit 1; }; echo "Isolated test data retained: $work"; exit "$result"; }
+trap cleanup EXIT
+"${base[@]}" up -d mysql redis >/dev/null
+ready=0
+for _ in $(seq 1 90); do
+  if docker exec "$project-mysql-1" sh -c 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 2
+done
+[ "$ready" = 1 ] || { echo 'Isolated database not ready' >&2; exit 1; }
+docker exec -i "$project-mysql-1" sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" scope_test_race 2>/dev/null' < deploy/scope_race_fixture.sql
+"${base[@]}" up -d --no-deps backend frontend >/dev/null
+wait_ready() { for _ in $(seq 1 90); do if curl -fsS http://127.0.0.1:22090/prod-api/captchaImage 2>/dev/null | grep -q '"code":200'; then return 0; fi; sleep 2; done; echo 'Isolated API not ready' >&2; return 1; }
+wait_ready
+EMS_ISOLATED_FIXTURE=YES python3 deploy/equipment_create_scope_e2e.py
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY EMS_ISOLATED_FIXTURE=YES EMS_TEST_ADMIN_USER=admin EMS_TEST_ADMIN_PASSWORD=admin123 EMS_TEST_A_USER=race_reader EMS_TEST_A_PASSWORD=admin123 EMS_TEST_A_DEPT_ID=99001 EMS_TEST_DEVICE_1=99001 python3 deploy/department_asset_admin_e2e.py
+"${base[@]}" -f "$work/disabled.yaml" up -d --no-deps --force-recreate backend >/dev/null
+# A 502 during restart is expected; require the new container to reach its API.
+wait_ready
+EMS_ISOLATED_FIXTURE=YES EMS_EXPECT_DISABLED=YES python3 deploy/equipment_create_scope_e2e.py

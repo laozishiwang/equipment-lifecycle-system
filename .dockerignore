@@ -1,0 +1,9 @@
+.git
+**/.git
+**/node_modules
+**/target
+**/dist
+.env*
+reference-source
+.local-python
+*.tar.gz

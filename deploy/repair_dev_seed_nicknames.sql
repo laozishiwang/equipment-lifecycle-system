@@ -1,0 +1,6 @@
+-- Isolated test database only; preserve any user-edited nickname.
+SET NAMES utf8mb4;
+START TRANSACTION;
+UPDATE sys_user SET nick_name=CONVERT(0xE88BA5E4BE9D USING utf8mb4) WHERE user_id=1 AND BINARY user_name=0x61646D696E AND BINARY nick_name=0xC3A8E280B9C2A5C3A4C2BEC29D;
+UPDATE sys_user SET nick_name=CONVERT(0xE88BA5E4BE9D USING utf8mb4) WHERE user_id=2 AND BINARY user_name=0x7279 AND BINARY nick_name=0xC3A8E280B9C2A5C3A4C2BEC29D;
+COMMIT;

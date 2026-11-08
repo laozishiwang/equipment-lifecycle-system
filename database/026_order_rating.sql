@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS ems_work_order_rating (
+  work_order_id BIGINT NOT NULL PRIMARY KEY,
+  reporter_id BIGINT NOT NULL,
+  stars TINYINT NOT NULL,
+  remark VARCHAR(500) NOT NULL DEFAULT '',
+  rated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_order_rating_stars CHECK (stars BETWEEN 1 AND 5)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

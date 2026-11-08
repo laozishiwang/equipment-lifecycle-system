@@ -1,0 +1,13 @@
+UPDATE sys_config SET config_value='false' WHERE config_key='sys.account.captchaEnabled';
+INSERT INTO sys_dept(dept_id,parent_id,ancestors,dept_name,order_num,status,del_flag) VALUES (99001,100,'0,100','Race A',0,'0','0'),(99002,100,'0,100','Race B',0,'0','0');
+INSERT INTO sys_role(role_id,role_name,role_key,role_sort,data_scope,status,del_flag) VALUES (99001,'Race viewer','race_viewer',1,'3','0','0');
+INSERT INTO sys_user(user_id,dept_id,user_name,nick_name,password,status,del_flag) SELECT 99001,99001,'race_reader','Race reader',password,'0','0' FROM sys_user WHERE user_id=1;
+INSERT INTO sys_user_role(user_id,role_id) VALUES (99001,99001);
+INSERT IGNORE INTO sys_role_menu(role_id,menu_id) SELECT 99001,menu_id FROM sys_menu WHERE perms IN ('equipment:order:list','equipment:order:viewAll');
+INSERT INTO ems_equipment(id,code,name) VALUES (99001,'RACE-DEVICE','Race device');
+INSERT INTO ems_equipment_department(equipment_id,dept_id) VALUES (99001,99001);
+INSERT INTO ems_work_order(id,equipment_id,reporter_id,technician_id,description,status) VALUES (99001,99001,1,1,'Race order','ACCEPTED');
+INSERT INTO ems_work_order_photo(id,work_order_id,stored_name,media_type,file_size,uploaded_by) VALUES (99001,99001,'00000000-0000-4000-8000-000000000001.png','image/png',68,1);
+CREATE USER IF NOT EXISTS 'scope_race'@'%' IDENTIFIED BY 'isolated-race-only-43';
+GRANT ALL PRIVILEGES ON scope_test_race.* TO 'scope_race'@'%';
+GRANT SELECT ON performance_schema.* TO 'scope_race'@'%';

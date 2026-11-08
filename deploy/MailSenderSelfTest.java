@@ -1,0 +1,10 @@
+package com.ruoyi.web.controller.equipment;
+import java.net.*;import java.io.*;import java.util.*;import org.springframework.jdbc.core.JdbcTemplate;
+public class MailSenderSelfTest {
+ static class Db extends JdbcTemplate {public List<Map<String,Object>> queryForList(String s){return List.of(Map.of("host","127.0.0.1","port",25252,"security","NONE","username","user","password","pass","sender","sender@example.com","recipients","first@example.com,second@example.com"));}}
+ public static void main(String[] a)throws Exception {
+  var server=new ServerSocket(25252);var lines=Collections.synchronizedList(new ArrayList<String>());
+  Thread t=new Thread(()->{try(var sock=server.accept();var in=new BufferedReader(new InputStreamReader(sock.getInputStream()));var out=new PrintWriter(sock.getOutputStream(),true)){out.print("220 localhost SMTP\r\n");out.flush();String s;boolean data=false;int auth=0;while((s=in.readLine())!=null){lines.add(s);String upper=s.toUpperCase(Locale.ROOT);if(data){if(s.equals(".")){data=false;out.print("250 queued\r\n");}}else if(upper.startsWith("EHLO")){out.print("250-localhost\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n");}else if(upper.startsWith("AUTH PLAIN")){out.print("235 authenticated\r\n");}else if(upper.startsWith("AUTH LOGIN")){auth=1;out.print("334 VXNlcm5hbWU6\r\n");}else if(auth==1){auth=2;out.print("334 UGFzc3dvcmQ6\r\n");}else if(auth==2){auth=0;out.print("235 authenticated\r\n");}else if(upper.startsWith("MAIL FROM")||upper.startsWith("RCPT TO")){out.print("250 OK\r\n");}else if(upper.equals("DATA")){data=true;out.print("354 end with dot\r\n");}else if(upper.equals("QUIT")){out.print("221 bye\r\n");out.flush();break;}else out.print("250 OK\r\n");out.flush();}}catch(Exception e){throw new RuntimeException(e);}});t.start();
+  new MailSender(new Db()).send("测试标题","测试内容");t.join(5000);server.close();if(lines.stream().filter(x->x.toUpperCase(Locale.ROOT).startsWith("RCPT TO:")).count()!=2)throw new AssertionError("recipients");System.out.println("local SMTP delivery to two recipients passed");
+ }
+}

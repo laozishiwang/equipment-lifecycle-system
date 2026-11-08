@@ -1,0 +1,13 @@
+**/target/
+**/node_modules/
+**/dist/
+.env
+.env.*
+!.env.production
+!.env.development
+!.env.staging
+*.log
+*.sql.gz
+backups/
+uploads/
+private-uploads/

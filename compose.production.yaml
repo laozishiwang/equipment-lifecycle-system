@@ -1,0 +1,134 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: equipment
+      MYSQL_USER: equipment
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD required}
+      ADMIN_BCRYPT_BASE64: ${ADMIN_BCRYPT_BASE64:?ADMIN_BCRYPT_BASE64 required}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/mysql-charset.cnf:/etc/mysql/conf.d/charset.cnf:ro
+      - ./backend/sql/ry_20260417.sql:/docker-entrypoint-initdb.d/01-ruoyi.sql:ro
+      - ./backend/sql/quartz.sql:/docker-entrypoint-initdb.d/02-quartz.sql:ro
+      - ./database/001_equipment.sql:/docker-entrypoint-initdb.d/03-equipment.sql:ro
+      - ./database/002_menu.sql:/docker-entrypoint-initdb.d/04-menu.sql:ro
+      - ./database/003_location_history.sql:/docker-entrypoint-initdb.d/05-location.sql:ro
+      - ./database/004_work_order_log.sql:/docker-entrypoint-initdb.d/06-work-order-log.sql:ro
+      - ./database/005_maintenance.sql:/docker-entrypoint-initdb.d/07-maintenance.sql:ro
+      - ./database/006_role_templates.sql:/docker-entrypoint-initdb.d/08-role-templates.sql:ro
+      - ./database/007_equipment_profile.sql:/docker-entrypoint-initdb.d/09-equipment-profile.sql:ro
+      - ./database/008_order_cancellation.sql:/docker-entrypoint-initdb.d/09b-order-cancellation.sql:ro
+      - ./database/009_order_assignment.sql:/docker-entrypoint-initdb.d/09c-order-assignment.sql:ro
+      - ./database/010_order_trial.sql:/docker-entrypoint-initdb.d/09d-order-trial.sql:ro
+      - ./database/011_order_photo.sql:/docker-entrypoint-initdb.d/09e-order-photo.sql:ro
+      - ./database/012_inspection_items.sql:/docker-entrypoint-initdb.d/09f-inspection-items.sql:ro
+      - ./database/013_inspection_templates.sql:/docker-entrypoint-initdb.d/09g-inspection-templates.sql:ro
+      - ./database/014_inspection_snapshot.sql:/docker-entrypoint-initdb.d/09h-inspection-snapshot.sql:ro
+      - ./database/015_inspection_numeric.sql:/docker-entrypoint-initdb.d/09i-inspection-numeric.sql:ro
+      - ./database/016_inspection_photo.sql:/docker-entrypoint-initdb.d/09j-inspection-photo.sql:ro
+      - ./database/017_inspection_photo_stage.sql:/docker-entrypoint-initdb.d/09k-inspection-photo-stage.sql:ro
+      - ./database/018_inspection_stage_quota_index.sql:/docker-entrypoint-initdb.d/09l-inspection-stage-quota-index.sql:ro
+      - ./database/019_repair_diagnosis.sql:/docker-entrypoint-initdb.d/09m-repair-diagnosis.sql:ro
+      - ./database/020_streamline_menu.sql:/docker-entrypoint-initdb.d/09n-streamline-menu.sql:ro
+      - ./database/021_repair_fault_category.sql:/docker-entrypoint-initdb.d/09o-repair-fault-category.sql:ro
+      - ./database/022_fault_code_catalog.sql:/docker-entrypoint-initdb.d/09p-fault-code-catalog.sql:ro
+      - ./database/023_repair_fault_code.sql:/docker-entrypoint-initdb.d/09q-repair-fault-code.sql:ro
+      - ./database/024_repair_cost_link.sql:/docker-entrypoint-initdb.d/09r-repair-cost-link.sql:ro
+      - ./database/025_equipment_department.sql:/docker-entrypoint-initdb.d/09s-equipment-department.sql:ro
+      - ./database/026_order_rating.sql:/docker-entrypoint-initdb.d/09t-order-rating.sql:ro
+      - ./database/027_restore_monitor_menu.sql:/docker-entrypoint-initdb.d/09u-monitor.sql:ro
+      - ./database/028_public_field.sql:/docker-entrypoint-initdb.d/09v-public-field.sql:ro
+      - ./database/029_dingtalk.sql:/docker-entrypoint-initdb.d/09w-dingtalk.sql:ro
+      - ./database/029_dingtalk_menu.sql:/docker-entrypoint-initdb.d/09x-dingtalk-menu.sql:ro
+      - ./database/030_mail_notification.sql:/docker-entrypoint-initdb.d/09y-mail.sql:ro
+      - ./database/030_notification_menu.sql:/docker-entrypoint-initdb.d/09z-notification-menu.sql:ro
+      - ./deploy/10-init-admin.sh:/docker-entrypoint-initdb.d/10-init-admin.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(mysql -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD -N -s $$MYSQL_DATABASE -e "SELECT COUNT(*) FROM sys_user WHERE user_id=1 AND user_name='admin' AND status='0' AND TO_BASE64(password) <> 'JDJhJDEwJDdKQjcyMHl1YlZTWnZVSTByRXFLLy5WcUdPWlRILnVsdTMzZEhPaUJFOEJ5T2hKSXJkQXUy' AND NOT EXISTS (SELECT 1 FROM (SELECT user_id,status FROM sys_user) AS u WHERE u.user_id=2 AND u.status='0')" 2>/dev/null)" = 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+  backend:
+    mem_limit: 1024m
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_DRUID_MASTER_URL: jdbc:mysql://mysql:3306/equipment?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_DRUID_MASTER_USERNAME: equipment
+      SPRING_DATASOURCE_DRUID_MASTER_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      SPRING_DATA_REDIS_HOST: redis
+      TOKEN_SECRET: ${TOKEN_SECRET:?TOKEN_SECRET required}
+      RUOYI_PROFILE: /app/uploads
+      EMS_PRIVATE_UPLOAD_DIR: /app/private-uploads
+      EMS_PRIVATE_UPLOAD_MAX_BYTES: ${EMS_PRIVATE_UPLOAD_MAX_BYTES:-5368709120}
+      EMS_PRIVATE_UPLOAD_MIN_FREE_BYTES: ${EMS_PRIVATE_UPLOAD_MIN_FREE_BYTES:-2147483648}
+      EMS_PUBLIC_BASE_URL: https://${SITE_DOMAIN:?SITE_DOMAIN required}
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRING_DATASOURCE_DRUID_STAT_VIEW_SERVLET_ENABLED: "false"
+      SPRING_DATASOURCE_DRUID_WEB_STAT_FILTER_ENABLED: "false"
+    volumes:
+      - uploads:/app/uploads
+      - private_uploads:/app/private-uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?SITE_DOMAIN required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+volumes:
+  mysql_data:
+  redis_data:
+  uploads:
+  private_uploads:
+  caddy_data:
+  caddy_config:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

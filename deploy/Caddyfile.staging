@@ -1,0 +1,12 @@
+{
+    default_sni {$SITE_DOMAIN}
+}
+{$SITE_DOMAIN} {
+    tls {
+        issuer acme {
+            dir https://acme-staging-v02.api.letsencrypt.org/directory
+            profile shortlived
+        }
+    }
+    respond "Equipment TLS staging test" 200
+}

@@ -1,0 +1,16 @@
+package com.ruoyi.web.controller.equipment;
+import java.util.*;import java.util.concurrent.*;import org.springframework.jdbc.core.JdbcTemplate;import org.springframework.jdbc.datasource.DriverManagerDataSource;import org.springframework.jdbc.datasource.DataSourceTransactionManager;import org.springframework.transaction.support.TransactionTemplate;
+public class EquipmentDepartmentRaceMysqlTest {
+ public static void main(String[] args) throws Exception {
+  var ds=new DriverManagerDataSource("jdbc:mysql://stage-photo-mysql:3306/photo_test?allowPublicKeyRetrieval=true&useSSL=false","root","isolated-test-only");var j=new JdbcTemplate(ds);var tm=new DataSourceTransactionManager(ds);var tx=new TransactionTemplate(tm);tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+  j.execute("CREATE TABLE ems_equipment(id BIGINT PRIMARY KEY)");j.execute("CREATE TABLE sys_dept(dept_id BIGINT PRIMARY KEY,dept_name VARCHAR(30),status CHAR(1),del_flag CHAR(1))");j.execute("CREATE TABLE ems_equipment_department(equipment_id BIGINT PRIMARY KEY,dept_id BIGINT)");j.execute("CREATE TABLE ems_equipment_department_history(equipment_id BIGINT,old_dept_id BIGINT,old_dept_name VARCHAR(30),new_dept_id BIGINT,new_dept_name VARCHAR(30),changed_by BIGINT,changed_at DATETIME,id BIGINT)");
+  j.update("INSERT INTO ems_equipment VALUES(1)");j.update("INSERT INTO sys_dept VALUES(10,'A','0','0'),(20,'B','0','0')");j.update("INSERT INTO ems_equipment_department VALUES(1,10)");
+  var access=new DepartmentScopeAccess(j,null,true){@Override public Scope current(String action){return new Scope(7,false,false,false,Set.of(10L),true);}};var controller=new EquipmentDepartmentController(j,access);
+  if(!Integer.valueOf(200).equals(tx.execute(s->controller.get(1)).get("code")))throw new AssertionError("initial access denied");
+  var locked=new CountDownLatch(1);var release=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);
+  try {var transfer=pool.submit(()->tx.executeWithoutResult(s->{j.queryForList("SELECT id FROM ems_equipment WHERE id=1 FOR UPDATE");j.update("UPDATE ems_equipment_department SET dept_id=20 WHERE equipment_id=1");locked.countDown();try{release.await(15,TimeUnit.SECONDS);}catch(InterruptedException e){throw new RuntimeException(e);}}));
+   if(!locked.await(10,TimeUnit.SECONDS))throw new AssertionError("lock absent");var read=pool.submit(()->tx.execute(s->controller.get(1)));
+   long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);boolean waited=false;while(System.nanoTime()<end){Long n=j.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID WHERE l.OBJECT_SCHEMA='photo_test' AND l.OBJECT_NAME='ems_equipment'",Long.class);if(n!=null&&n>0){waited=true;break;}Thread.sleep(50);}if(!waited)throw new AssertionError("reader did not wait on device lock");release.countDown();transfer.get(15,TimeUnit.SECONDS);var result=read.get(15,TimeUnit.SECONDS);if(Integer.valueOf(200).equals(result.get("code")))throw new AssertionError("out-of-scope department exposed");System.out.println("department ownership transfer and read race passed");
+  } finally {release.countDown();pool.shutdownNow();}
+ }
+}
