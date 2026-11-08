@@ -9,6 +9,7 @@ import DepartmentOwnership from './DepartmentOwnership.vue'
 import { checkPermi } from '@/utils/permission'
 
 const qrVisible = ref(false), qrImage = ref(''), qrUrl = ref(''), qrWarning=ref('')
+const qrAsset = ref(null)
 const mobile=useMediaQuery('(max-width: 767px)')
 async function showQr(row) {
   const data=(await request({url:'/equipment/assets/qr-base',method:'get'})).data
@@ -19,8 +20,10 @@ async function showQr(row) {
   qrWarning.value=address.protocol!=='https:' || local ? '当前地址不是可供公网手机安全访问的 HTTPS 地址，请勿打印为正式设备二维码。' : ''
   qrUrl.value=address.origin+'/field/'+row.id
   qrImage.value=await QRCode.toDataURL(qrUrl.value,{width:320,margin:2})
+  qrAsset.value={name:row.name,code:row.code}
   qrVisible.value=true
 }
+function printQr() { window.print() }
 const historyOpen = ref(false), history = ref(null)
 async function showHistory(row) { history.value = (await request({ url: '/equipment/assets/' + row.id + '/history', method: 'get' })).data; historyOpen.value = true }
 const keyword = ref(''), appliedKeyword = ref(''), ownership = ref('ALL'), appliedOwnership = ref('ALL')
@@ -148,7 +151,17 @@ onMounted(load)
     </el-dialog>
     <el-dialog v-model="editOpen" title="编辑设备" width="min(90%, 520px)"><el-form label-position="top"><el-form-item label="设备编号"><el-input :model-value="editForm.code" disabled/></el-form-item><el-form-item label="名称"><el-input v-model="editForm.name" maxlength="128"/></el-form-item><el-form-item label="型号"><el-input v-model="editForm.model" maxlength="128"/></el-form-item><el-form-item label="位置"><el-input v-model="editForm.location" maxlength="255"/></el-form-item><el-form-item label="厂家"><el-input v-model="editForm.manufacturer" maxlength="128"/></el-form-item><el-form-item label="出厂编号"><el-input v-model="editForm.serialNumber" maxlength="128"/></el-form-item><el-form-item label="购置日期"><el-date-picker v-model="editForm.purchaseDate" value-format="YYYY-MM-DD"/></el-form-item><el-form-item label="质保截止"><el-date-picker v-model="editForm.warrantyUntil" value-format="YYYY-MM-DD"/></el-form-item><el-form-item label="状态"><el-select v-model="editForm.status"><el-option label="在用" value="ACTIVE"/><el-option label="报废" value="RETIRED"/></el-select></el-form-item></el-form><template #footer><el-button @click="editOpen=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button></template></el-dialog>
     <el-dialog v-model="historyOpen" title="设备履历" width="min(95%, 900px)"><template v-if="history"><h3>{{ history.equipment.code }} · {{ history.equipment.name }}</h3><el-descriptions :column="2" border><el-descriptions-item label="厂家">{{ history.equipment.manufacturer || "—" }}</el-descriptions-item><el-descriptions-item label="出厂编号">{{ history.equipment.serial_number || "—" }}</el-descriptions-item><el-descriptions-item label="购置日期">{{ history.equipment.purchase_date || "—" }}</el-descriptions-item><el-descriptions-item label="质保截止">{{ history.equipment.warranty_until || "—" }}</el-descriptions-item></el-descriptions><h4>位置变更（最近 200 条）</h4><el-table :data="history.locations"><el-table-column prop="location" label="位置"/><el-table-column prop="changed_at" label="变更时间"/><el-table-column prop="changed_by" label="操作人 ID"/></el-table><h4>维修工单（最近 200 条）</h4><el-table :data="history.orders"><el-table-column prop="description" label="故障"/><el-table-column prop="repair_description" label="维修内容"/><el-table-column prop="repair_date" label="维修日期"/><el-table-column prop="total_cost" label="费用合计"/><el-table-column prop="status" label="状态"/></el-table><h4>保养记录（最近 200 条）</h4><el-table :data="history.maintenance"><el-table-column prop="title" label="保养计划"/><el-table-column prop="completed_date" label="完成日期"/><el-table-column prop="completed_by" label="操作人 ID"/><el-table-column prop="notes" label="保养内容"/></el-table><h4>巡检记录（最近 200 条）</h4><el-table :data="history.inspections"><el-table-column prop="inspected_at" label="时间"/><el-table-column prop="result" label="结果"/><el-table-column prop="remark" label="说明"/></el-table></template></el-dialog>
-    <el-dialog v-model="qrVisible" title="设备二维码" width="min(90%, 420px)"><el-alert v-if="qrWarning" :title="qrWarning" type="warning" :closable="false" show-icon/><div style="text-align:center"><img :src="qrImage" alt="设备二维码" style="max-width:100%"><p style="overflow-wrap:anywhere">{{ qrUrl }}</p><p>打印前请确认地址可从手机访问。</p></div></el-dialog>
+    <el-dialog v-model="qrVisible" title="设备二维码" width="min(90%, 420px)">
+      <el-alert v-if="qrWarning" :title="qrWarning" type="warning" :closable="false" show-icon/>
+      <div class="equipment-qr-print" v-if="qrAsset">
+        <strong class="qr-asset-name">{{ qrAsset.name }}</strong>
+        <span class="qr-asset-code">设备编号：{{ qrAsset.code }}</span>
+        <img :src="qrImage" alt="设备二维码">
+        <span class="qr-caption">扫码巡检 / 报修</span>
+      </div>
+      <p class="qr-address">{{ qrUrl }}<br>打印前请确认地址可从手机访问。</p>
+      <template #footer><el-button @click="qrVisible=false">关闭</el-button><el-button type="primary" @click="printQr">打印二维码</el-button></template>
+    </el-dialog>
     <el-dialog v-model="visible" title="新增设备" width="min(90%, 520px)">
       <el-alert v-if="createDeptError" title="归属部门加载失败，请重试" type="error" :closable="false" show-icon><el-button link type="primary" @click="loadCreateDepartments">重新加载</el-button></el-alert>
       <el-form label-position="top">
@@ -165,6 +178,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+.equipment-qr-print { display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; color:#222; overflow-wrap:anywhere; }
+.equipment-qr-print img { width: min(100%, 280px); height:auto; }
+.qr-asset-name { font-size:18px; }
+.qr-asset-code,.qr-caption { font-size:14px; }
+.qr-address { text-align:center; overflow-wrap:anywhere; margin-top:12px; }
 .template-item{display:flex;gap:8px;width:100%;margin-bottom:8px;flex-wrap:wrap}.template-item .el-input{flex:1;min-width:150px}
 .search { display:flex; gap:8px; max-width:420px; margin-bottom:16px; }
 .ownership-filter { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; } .ownership-filter label { white-space:nowrap; color:#53657a; } .ownership-filter .el-select { width:180px; }
@@ -184,6 +202,15 @@ h2 { margin: 0 0 8px; font-size: 24px; } p { margin: 0; color: #7b8794; }
   dl { margin:14px 0; display:grid; gap:7px; font-size:13px; }
   dl div { display:flex; gap:12px; min-width:0; } dt { color:#7b8794; flex:none; width:52px; } dd { margin:0; color:#36475b; min-width:0; }
   .card-actions { display:flex; flex-wrap:wrap; gap:8px 14px; } .card-actions :deep(.el-button) { margin:0; }
+}
+</style>
+
+<style>
+@media print {
+  body * { visibility:hidden !important; }
+  .equipment-qr-print, .equipment-qr-print * { visibility:visible !important; }
+  .equipment-qr-print { position:fixed; top:0; left:0; width:100%; color:#000; }
+  .equipment-qr-print img { width:50mm; height:50mm; }
 }
 </style>
 
