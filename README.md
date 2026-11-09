@@ -24,3 +24,21 @@
 - [AI 二次开发指南](docs/AI_DEVELOPMENT.md)：代码定位及修改注意事项。
 
 运行前须设置新的管理员密码与独立的数据库、Redis 和 token 密钥。按实际部署的备份路径、权限和服务配置进行恢复演练；请勿把生产密码、机器人 Webhook、私钥或备份提交到仓库。
+
+
+## 界面截图
+<img width="3164" height="3658" alt="长截图_20261110_075527" src="https://github.com/user-attachments/assets/1e98b30f-bc7a-4d73-aa87-46d2c6a880bf" />
+
+<img width="3202" height="1282" alt="局部截取_20261110_075600" src="https://github.com/user-attachments/assets/6ae1c762-4b65-40fc-a3f7-2a8187515ed9" />
+
+<img width="3202" height="1644" alt="局部截取_20261110_075619" src="https://github.com/user-attachments/assets/10add37e-d5fb-4013-a632-c6a74d6eda57" />
+
+<img width="3202" height="1020" alt="局部截取_20261110_075640" src="https://github.com/user-attachments/assets/e17815e6-d352-473f-b01f-25920a794820" />
+
+
+<img width="3200" height="1194" alt="局部截取_20261110_075649" src="https://github.com/user-attachments/assets/b187d79b-77da-409e-ac21-238c456491ac" />
+
+
+
+
+
