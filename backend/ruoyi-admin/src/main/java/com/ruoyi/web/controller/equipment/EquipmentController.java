@@ -19,6 +19,8 @@ public class EquipmentController extends BaseController {
     private final DepartmentScopeAccess departmentScope;
     @org.springframework.beans.factory.annotation.Value("${ems.public-base-url:}")
     private String publicBaseUrl;
+    @org.springframework.beans.factory.annotation.Value("${ems.private-upload-dir:./private-uploads}")
+    private String privateUploadDir;
     public EquipmentController(JdbcTemplate jdbc, DepartmentScopeAccess departmentScope) { this.jdbc = jdbc; this.departmentScope = departmentScope; }
 
     public record Asset(String code, String name, String model, String location, String manufacturer, String serialNumber, LocalDate purchaseDate, LocalDate warrantyUntil, Long deptId) {}
@@ -104,6 +106,72 @@ public class EquipmentController extends BaseController {
         return success(Map.of("equipment",equipment.get(0),"inspections",inspections,"orders",orders,"locations",locations,"maintenance",maintenance));
     }
     public record AssetUpdate(String name, String model, String location, String status, String manufacturer, String serialNumber, LocalDate purchaseDate, LocalDate warrantyUntil) {}
+
+    /** 汇总删除前需要向操作者说明的业务记录。 */
+    @PreAuthorize("@ss.hasPermi('equipment:asset:edit')")
+    @GetMapping("/{id}/deletion-summary")
+    public AjaxResult deletionSummary(@PathVariable long id) {
+        if (jdbc.queryForList("SELECT id FROM ems_equipment WHERE id=?", id).isEmpty() ||
+            (departmentScope.enabled() && !departmentScope.canEquipment(departmentScope.current("equipment:asset:edit"), id))) return error("设备不存在或无权限");
+        return success(jdbc.queryForMap("SELECT " +
+            "(SELECT COUNT(*) FROM ems_work_order WHERE equipment_id=?) AS orders, " +
+            "(SELECT COUNT(*) FROM ems_inspection WHERE equipment_id=?) AS inspections, " +
+            "(SELECT COUNT(*) FROM ems_maintenance_plan WHERE equipment_id=?) AS maintenance, " +
+            "(SELECT COUNT(*) FROM ems_work_order_photo p JOIN ems_work_order w ON w.id=p.work_order_id WHERE w.equipment_id=?) + " +
+            "(SELECT COUNT(*) FROM ems_inspection_photo p JOIN ems_inspection i ON i.id=p.inspection_id WHERE i.equipment_id=?) AS photos, " +
+            "(SELECT COUNT(*) FROM ems_repair_cost c JOIN ems_work_order w ON w.id=c.work_order_id WHERE w.equipment_id=?) AS costs, " +
+            "(SELECT COUNT(*) FROM ems_inspection_photo_stage WHERE equipment_id=?) AS stagedPhotos", id,id,id,id,id,id,id));
+    }
+
+    @PreAuthorize("@ss.hasPermi('equipment:asset:edit')")
+    @Transactional
+    @DeleteMapping("/{id}")
+    public AjaxResult deleteUnused(@PathVariable long id) {
+        if (jdbc.queryForList("SELECT id FROM ems_equipment WHERE id=? FOR UPDATE", id).isEmpty() ||
+            (departmentScope.enabled() && !departmentScope.canEquipment(departmentScope.current("equipment:asset:edit"), id))) return error("设备不存在或无权限");
+        Long records=jdbc.queryForObject("SELECT (SELECT COUNT(*) FROM ems_work_order WHERE equipment_id=?) + (SELECT COUNT(*) FROM ems_inspection WHERE equipment_id=?) + (SELECT COUNT(*) FROM ems_maintenance_plan WHERE equipment_id=?) + (SELECT COUNT(*) FROM ems_inspection_photo_stage WHERE equipment_id=?)", Long.class,id,id,id,id);
+        if (records != null && records > 0) return error("该设备存在维修、巡检、保养或待处理照片，不能普通删除。请在编辑中将设备设为报废，以保留历史记录。");
+        jdbc.update("DELETE FROM ems_equipment_inspection_template WHERE equipment_id=?", id);
+        jdbc.update("DELETE FROM ems_equipment_department_history WHERE equipment_id=?", id);
+        jdbc.update("DELETE FROM ems_equipment_department WHERE equipment_id=?", id);
+        jdbc.update("DELETE FROM ems_equipment_location_history WHERE equipment_id=?", id);
+        jdbc.update("DELETE FROM ems_equipment_profile WHERE equipment_id=?", id);
+        jdbc.update("DELETE FROM ems_equipment WHERE id=?", id);
+        return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('equipment:asset:edit')")
+    @Transactional
+    @DeleteMapping("/{id}/with-history")
+    public AjaxResult deleteWithHistory(@PathVariable long id, @RequestParam String confirmCode) {
+        var assets=jdbc.queryForList("SELECT code FROM ems_equipment WHERE id=? FOR UPDATE",id);
+        if (assets.isEmpty() || (departmentScope.enabled() && !departmentScope.canEquipment(departmentScope.current("equipment:asset:edit"),id))) return error("设备不存在或无权限");
+        if (!String.valueOf(assets.get(0).get("code")).equals(confirmCode)) return error("设备编号不匹配，未删除");
+        String orders="SELECT id FROM ems_work_order WHERE equipment_id=?";
+        String inspections="SELECT id FROM ems_inspection WHERE equipment_id=?";
+        var photos=jdbc.queryForList("SELECT stored_name FROM ems_work_order_photo WHERE work_order_id IN ("+orders+") UNION SELECT stored_name FROM ems_inspection_photo WHERE inspection_id IN ("+inspections+") UNION SELECT stored_name FROM ems_inspection_photo_stage WHERE equipment_id=?",String.class,id,id,id);
+        String repairs="SELECT id FROM ems_work_order_repair WHERE work_order_id IN ("+orders+")";
+        for (String table : List.of("ems_work_order_repair_diagnosis","ems_repair_fault_category","ems_repair_fault_code","ems_repair_cost_link")) jdbc.update("DELETE FROM "+table+" WHERE repair_id IN ("+repairs+")",id);
+        jdbc.update("DELETE FROM ems_repair_cost_link WHERE cost_id IN (SELECT id FROM ems_repair_cost WHERE work_order_id IN ("+orders+"))",id);
+        for (String table : List.of("ems_work_order_photo","ems_repair_cost","ems_work_order_trial","ems_work_order_repair","ems_work_order_log","ems_work_order_assignment","ems_work_order_cancellation","ems_work_order_rating")) jdbc.update("DELETE FROM "+table+" WHERE work_order_id IN ("+orders+")",id);
+        for (String table : List.of("ems_dingtalk_outbox","ems_mail_outbox")) jdbc.update("DELETE FROM "+table+" WHERE order_id IN ("+orders+")",id);
+        jdbc.update("DELETE FROM ems_work_order WHERE equipment_id=?",id);
+        jdbc.update("DELETE FROM ems_inspection_numeric_observation WHERE inspection_item_id IN (SELECT id FROM ems_inspection_item WHERE inspection_id IN ("+inspections+"))",id);
+        for (String table : List.of("ems_inspection_photo","ems_inspection_item","ems_inspection_template_snapshot")) jdbc.update("DELETE FROM "+table+" WHERE inspection_id IN ("+inspections+")",id);
+        jdbc.update("DELETE FROM ems_inspection_photo_stage WHERE equipment_id=?",id);
+        jdbc.update("DELETE FROM ems_inspection WHERE equipment_id=?",id);
+        jdbc.update("DELETE FROM ems_maintenance_record WHERE plan_id IN (SELECT id FROM ems_maintenance_plan WHERE equipment_id=?)",id);
+        jdbc.update("DELETE FROM ems_maintenance_plan WHERE equipment_id=?",id);
+        for (String table : List.of("ems_equipment_inspection_template","ems_equipment_department_history","ems_equipment_department","ems_equipment_location_history","ems_equipment_profile")) jdbc.update("DELETE FROM "+table+" WHERE equipment_id=?",id);
+        jdbc.update("DELETE FROM ems_equipment WHERE id=?",id);
+        var directory=java.nio.file.Path.of(privateUploadDir).toAbsolutePath().normalize();
+        for (String name : photos) {
+            var target=directory.resolve(name).normalize();
+            if (!target.getParent().equals(directory)) throw new IllegalStateException("照片路径无效");
+            StagePhotoCommitCleanup.register(target, () -> jdbc.queryForObject("SELECT (SELECT COUNT(*) FROM ems_work_order_photo WHERE stored_name=?)+(SELECT COUNT(*) FROM ems_inspection_photo WHERE stored_name=?)+(SELECT COUNT(*) FROM ems_inspection_photo_stage WHERE stored_name=?)",Long.class,name,name,name)==0);
+        }
+        return success();
+    }
 
     @PreAuthorize("@ss.hasPermi('equipment:asset:edit')")
     @Transactional

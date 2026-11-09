@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import request from '@/utils/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import FaultCodeCatalog from './FaultCodeCatalog.vue'
 import DepartmentOwnership from './DepartmentOwnership.vue'
@@ -87,6 +87,27 @@ async function saveTemplate() {
 }
 const editOpen = ref(false), editForm = ref({})
 async function openEdit(row) { const d = (await request({url:'/equipment/assets/' + row.id, method:'get'})).data; editForm.value = { ...d, serialNumber:d.serial_number, purchaseDate:d.purchase_date, warrantyUntil:d.warranty_until }; editOpen.value = true }
+async function deleteUnused(row) {
+  const summary=(await request({url:'/equipment/assets/'+row.id+'/deletion-summary',method:'get'})).data
+  if (summary.orders || summary.inspections || summary.maintenance || summary.stagedPhotos) {
+    await ElMessageBox.alert(`该设备有 ${summary.orders} 条维修工单、${summary.inspections} 条巡检记录、${summary.maintenance} 项保养计划、${summary.stagedPhotos} 张暂存照片，不能普通删除。请点击“编辑”，将状态设为“报废”以保留历史。`, '不能删除', {type:'warning',confirmButtonText:'知道了'})
+    return
+  }
+  try { await ElMessageBox.confirm(`确认删除设备“${row.name}”（${row.code}）？该操作不可撤销。`, '删除设备', {type:'warning',confirmButtonText:'确认删除',cancelButtonText:'取消'}) } catch { return }
+  await request({url:'/equipment/assets/'+row.id,method:'delete'})
+  ElMessage.success('设备已删除')
+  await load(false)
+}
+async function deleteWithHistory(row) {
+  const s=(await request({url:'/equipment/assets/'+row.id+'/deletion-summary',method:'get'})).data
+  let result
+  try {
+    result=await ElMessageBox.prompt(`将永久删除设备及其历史：维修工单 ${s.orders} 条、巡检 ${s.inspections} 条、保养计划 ${s.maintenance} 项、费用 ${s.costs} 条、照片 ${s.photos} 张。操作无法撤销，请先备份。请输入设备编号 ${row.code} 确认。`, '彻底删除设备及历史', {type:'warning',confirmButtonText:'永久删除',cancelButtonText:'取消',inputValidator:value=>value===row.code || '设备编号不匹配'})
+  } catch { return }
+  await request({url:'/equipment/assets/'+row.id+'/with-history',method:'delete',params:{confirmCode:result.value}})
+  ElMessage.success('设备及历史记录已删除')
+  await load(false)
+}
 async function saveEdit() { if (!editForm.value.name?.trim()) return ElMessage.warning('请填写设备名称'); saving.value = true; try { await request({url:'/equipment/assets/' + editForm.value.id,method:'put',data:editForm.value}); editOpen.value=false; ElMessage.success('设备已更新'); await load() } finally { saving.value=false } }
 const form = ref({ code: '', name: '', model: '', location: '', manufacturer:'', serialNumber:'', purchaseDate:null, warrantyUntil:null, deptId:null })
 let loadVersion=0
@@ -128,6 +149,8 @@ onMounted(load)
       <el-table-column prop="location" label="位置" min-width="140" />
       <el-table-column prop="status" label="状态" width="110" />
       <el-table-column label="编辑" width="90"><template #default="{row}"><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openEdit(row)">编辑</el-button></template></el-table-column>
+      <el-table-column label="删除" width="90"><template #default="{row}"><el-button v-hasPermi="['equipment:asset:edit']" link type="danger" @click="deleteUnused(row)">删除</el-button></template></el-table-column>
+      <el-table-column label="彻底删除" width="100"><template #default="{row}"><el-button v-hasPermi="['equipment:asset:edit']" link type="danger" @click="deleteWithHistory(row)">删除含历史</el-button></template></el-table-column>
       <el-table-column label="归属部门" min-width="150"><template #default="{row}"><span>{{ row.dept_name || '未设置' }}</span> <DepartmentOwnership v-hasPermi="['equipment:asset:edit']" :row="row" @saved="load(false)"/></template></el-table-column>
       <el-table-column label="巡检模板" width="100"><template #default="{row}"><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openTemplate(row)">配置</el-button></template></el-table-column>
       <el-table-column label="履历" width="90"><template #default="{row}"><el-button v-hasPermi="['equipment:asset:history']" link type="primary" @click="showHistory(row)">查看</el-button></template></el-table-column>
@@ -137,7 +160,7 @@ onMounted(load)
       <article v-for="row in rows" :key="row.id" class="asset-card">
         <div class="card-heading"><div><strong>{{ row.name }}</strong><p>{{ row.code }}</p></div><span class="asset-status" :class="{retired:row.status==='RETIRED'}">{{ row.status==='ACTIVE' ? '在用' : row.status==='RETIRED' ? '报废' : row.status }}</span></div>
         <dl><div><dt>位置</dt><dd>{{ row.location || '未设置' }}</dd></div><div><dt>型号</dt><dd>{{ row.model || '未设置' }}</dd></div><div><dt>归属部门</dt><dd>{{ row.dept_name || '未设置' }}</dd></div></dl>
-        <div class="card-actions"><el-button v-if="checkPermi(['equipment:inspection:add','equipment:order:report'])" link type="primary" @click="$router.push('/field/'+row.id)">现场巡检 / 报修</el-button><el-button link type="primary" @click="showQr(row)">二维码</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openEdit(row)">编辑</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openTemplate(row)">巡检模板</el-button><DepartmentOwnership v-hasPermi="['equipment:asset:edit']" :row="row" @saved="load(false)"/><el-button v-hasPermi="['equipment:asset:history']" link type="primary" @click="showHistory(row)">履历</el-button></div>
+        <div class="card-actions"><el-button v-if="checkPermi(['equipment:inspection:add','equipment:order:report'])" link type="primary" @click="$router.push('/field/'+row.id)">现场巡检 / 报修</el-button><el-button link type="primary" @click="showQr(row)">二维码</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openEdit(row)">编辑 / 报废</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="danger" @click="deleteUnused(row)">删除</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="danger" @click="deleteWithHistory(row)">删除含历史</el-button><el-button v-hasPermi="['equipment:asset:edit']" link type="primary" @click="openTemplate(row)">巡检模板</el-button><DepartmentOwnership v-hasPermi="['equipment:asset:edit']" :row="row" @saved="load(false)"/><el-button v-hasPermi="['equipment:asset:history']" link type="primary" @click="showHistory(row)">履历</el-button></div>
       </article>
       <el-empty v-if="!loading && !rows.length" description="暂无设备" />
     </div>
