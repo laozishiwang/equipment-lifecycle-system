@@ -27,7 +27,8 @@
 
 
 ## 界面截图
-<img width="3164" height="3658" alt="长截图_20261110_075527" src="https://github.com/user-attachments/assets/1e98b30f-bc7a-4d73-aa87-46d2c6a880bf" />
+<img width="3176" height="3195" alt="长截图_20261110_075751" src="https://github.com/user-attachments/assets/03e668bf-8473-46a7-bf6a-b7fa76f90171" />
+
 
 <img width="3202" height="1282" alt="局部截取_20261110_075600" src="https://github.com/user-attachments/assets/6ae1c762-4b65-40fc-a3f7-2a8187515ed9" />
 
